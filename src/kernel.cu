@@ -252,9 +252,11 @@ __device__ glm::vec3 computeVelocityChange(int N, int iSelf, const glm::vec3 *po
 		}
 	}
 
+	if (count_rule1 > 0) 
+		Prec_cent /= count_rule1;
+	if (count_rule2 > 0)
+		Prec_vel /= count_rule2;
 
-	Prec_cent /= count_rule1;
-	Prec_vel /= count_rule2;
 	
 	// Rule 1: boids fly towards their local perceived center of mass, which excludes themselves
   // Rule 2: boids try to stay a distance d away from each other
@@ -268,11 +270,17 @@ __device__ glm::vec3 computeVelocityChange(int N, int iSelf, const glm::vec3 *po
 */
 __global__ void kernUpdateVelocityBruteForce(int N, glm::vec3 *pos,
   glm::vec3 *vel1, glm::vec3 *vel2) {
-
+	
 	int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 
 	if (index < N) {
-		vel1[index] = glm::clamp(computeVelocityChange(N, index, pos, vel2), 0.0f, maxSpeed);
+		glm::vec3 velocity = computeVelocityChange(N, index, pos, vel1);
+
+		if (glm::length(velocity) > maxSpeed) {
+			velocity = glm::normalize(velocity)*maxSpeed;
+		}
+
+		vel2[index] = velocity;
 		//vel1[index] = computeVelocityChange(N, index, pos, vel2);
 	}
 
@@ -385,8 +393,8 @@ void Boids::stepSimulationNaive(float dt) {
 	dim3 fullBlocksPerGrid((numObjects + blockSize - 1) / blockSize);
 
 	kernUpdateVelocityBruteForce << <fullBlocksPerGrid, blockSize >> > (numObjects, dev_pos, dev_vel1, dev_vel2);
-	kernUpdatePos << <fullBlocksPerGrid, blockSize >> > (numObjects, dt, dev_pos, dev_vel1);
-	dev_vel2 = dev_vel1;
+	kernUpdatePos << <fullBlocksPerGrid, blockSize >> > (numObjects, dt, dev_pos, dev_vel2);
+	std::swap(dev_vel1, dev_vel2);
   // TODO-1.2 - use the kernels you wrote to step the simulation forward in time.
   // TODO-1.2 ping-pong the velocity buffers
 }
