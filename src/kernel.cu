@@ -230,10 +230,36 @@ void Boids::copyBoidsToVBO(float *vbodptr_positions, float *vbodptr_velocities) 
 * in the `pos` and `vel` arrays.
 */
 __device__ glm::vec3 computeVelocityChange(int N, int iSelf, const glm::vec3 *pos, const glm::vec3 *vel) {
-  // Rule 1: boids fly towards their local perceived center of mass, which excludes themselves
+	glm::vec3 Prec_cent(0.0, 0.0, 0.0);
+	glm::vec3 c(0.0, 0.0, 0.0);
+	glm::vec3 Prec_vel(0.0, 0.0, 0.0);
+	int count_rule1 = 0;
+	int count_rule2 = 0;
+	for (int k = 0; k < N; k++) {
+		if (k != iSelf) {
+			float distance = glm::distance(pos[iSelf], pos[k]);
+			if (distance < rule1Distance) {
+				count_rule1 += 1;
+				Prec_cent += pos[k];
+			}
+			if (distance < rule2Distance) {
+				c -= pos[k] - pos[iSelf];
+			}
+			if (distance < rule3Distance) {
+				Prec_vel += vel[k];
+				count_rule2 += 1;
+			}
+		}
+	}
+
+
+	Prec_cent /= count_rule1;
+	Prec_vel /= count_rule2;
+	
+	// Rule 1: boids fly towards their local perceived center of mass, which excludes themselves
   // Rule 2: boids try to stay a distance d away from each other
   // Rule 3: boids try to match the speed of surrounding boids
-  return glm::vec3(0.0f, 0.0f, 0.0f);
+  return vel[iSelf] + ((Prec_cent - pos[iSelf]) * rule1Scale) + (c*rule2Scale) + (Prec_vel* rule3Scale);
 }
 
 /**
@@ -242,6 +268,15 @@ __device__ glm::vec3 computeVelocityChange(int N, int iSelf, const glm::vec3 *po
 */
 __global__ void kernUpdateVelocityBruteForce(int N, glm::vec3 *pos,
   glm::vec3 *vel1, glm::vec3 *vel2) {
+
+	int index = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+	if (index < N) {
+		vel1[index] = glm::clamp(computeVelocityChange(N, index, pos, vel2), 0.0f, maxSpeed);
+		//vel1[index] = computeVelocityChange(N, index, pos, vel2);
+	}
+
+	
   // Compute a new velocity based on pos and vel1
   // Clamp the speed
   // Record the new velocity into vel2. Question: why NOT vel1?
@@ -347,6 +382,11 @@ __global__ void kernUpdateVelNeighborSearchCoherent(
 * Step the entire N-body simulation by `dt` seconds.
 */
 void Boids::stepSimulationNaive(float dt) {
+	dim3 fullBlocksPerGrid((numObjects + blockSize - 1) / blockSize);
+
+	kernUpdateVelocityBruteForce << <fullBlocksPerGrid, blockSize >> > (numObjects, dev_pos, dev_vel1, dev_vel2);
+	kernUpdatePos << <fullBlocksPerGrid, blockSize >> > (numObjects, dt, dev_pos, dev_vel1);
+	dev_vel2 = dev_vel1;
   // TODO-1.2 - use the kernels you wrote to step the simulation forward in time.
   // TODO-1.2 ping-pong the velocity buffers
 }
